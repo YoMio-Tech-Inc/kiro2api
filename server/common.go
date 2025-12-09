@@ -334,14 +334,24 @@ type RequestContext struct {
 }
 
 // GetTokenAndBody 通用的token获取和请求体读取
+// 优先使用动态获取的 token（如果存在），否则从 AuthService 获取
 // 返回: tokenInfo, requestBody, error
 func (rc *RequestContext) GetTokenAndBody() (types.TokenInfo, []byte, error) {
-	// 获取token
-	tokenInfo, err := rc.AuthService.GetToken()
-	if err != nil {
-		logger.Error("获取token失败", logger.Err(err))
-		respondError(rc.GinContext, http.StatusInternalServerError, "获取token失败: %v", err)
-		return types.TokenInfo{}, nil, err
+	var tokenInfo types.TokenInfo
+	var err error
+
+	// 优先检查是否有动态获取的 token（通过 refresh token 认证）
+	if dynamicToken, ok := GetDynamicToken(rc.GinContext); ok {
+		tokenInfo = dynamicToken
+		logger.Debug("使用动态获取的token")
+	} else {
+		// 从 AuthService 获取 token
+		tokenInfo, err = rc.AuthService.GetToken()
+		if err != nil {
+			logger.Error("获取token失败", logger.Err(err))
+			respondError(rc.GinContext, http.StatusInternalServerError, "获取token失败: %v", err)
+			return types.TokenInfo{}, nil, err
+		}
 	}
 
 	// 读取请求体
@@ -366,14 +376,30 @@ func (rc *RequestContext) GetTokenAndBody() (types.TokenInfo, []byte, error) {
 }
 
 // GetTokenWithUsageAndBody 获取token（包含使用信息）和请求体
+// 优先使用动态获取的 token（如果存在），否则从 AuthService 获取
 // 返回: tokenWithUsage, requestBody, error
 func (rc *RequestContext) GetTokenWithUsageAndBody() (*types.TokenWithUsage, []byte, error) {
-	// 获取token（包含使用信息）
-	tokenWithUsage, err := rc.AuthService.GetTokenWithUsage()
-	if err != nil {
-		logger.Error("获取token失败", logger.Err(err))
-		respondError(rc.GinContext, http.StatusInternalServerError, "获取token失败: %v", err)
-		return nil, nil, err
+	var tokenWithUsage *types.TokenWithUsage
+	var err error
+
+	// 优先检查是否有动态获取的 token（通过 refresh token 认证）
+	if dynamicToken, ok := GetDynamicToken(rc.GinContext); ok {
+		// 动态 token 不带使用信息，构造一个基本的 TokenWithUsage
+		tokenWithUsage = &types.TokenWithUsage{
+			TokenInfo:       dynamicToken,
+			UsageLimits:     nil, // 动态 token 不检查使用限制
+			AvailableCount:  -1,  // -1 表示无限制或未知
+			IsUsageExceeded: false,
+		}
+		logger.Debug("使用动态获取的token（无使用限制检查）")
+	} else {
+		// 从 AuthService 获取 token（包含使用信息）
+		tokenWithUsage, err = rc.AuthService.GetTokenWithUsage()
+		if err != nil {
+			logger.Error("获取token失败", logger.Err(err))
+			respondError(rc.GinContext, http.StatusInternalServerError, "获取token失败: %v", err)
+			return nil, nil, err
+		}
 	}
 
 	// 读取请求体

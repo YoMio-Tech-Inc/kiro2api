@@ -4,10 +4,17 @@ import (
 	"net/http"
 	"strings"
 
+	"kiro2api/auth"
 	"kiro2api/logger"
+	"kiro2api/types"
 	"kiro2api/utils"
 
 	"github.com/gin-gonic/gin"
+)
+
+// Context keys for dynamic token
+const (
+	DynamicTokenKey = "dynamic_token"
 )
 
 // PathBasedAuthMiddleware 创建基于路径的API密钥验证中间件
@@ -103,7 +110,9 @@ func extractAPIKey(c *gin.Context) string {
 	return apiKey
 }
 
-// validateAPIKey 验证API密钥 - 重构后的版本
+// validateAPIKey 验证API密钥 - 支持两种认证模式
+// 1. 预配置的 KIRO_CLIENT_TOKEN（原有模式）
+// 2. 动态传入的 refresh token（新增模式）
 func validateAPIKey(c *gin.Context, authToken string) bool {
 	providedApiKey := extractAPIKey(c)
 
@@ -113,13 +122,54 @@ func validateAPIKey(c *gin.Context, authToken string) bool {
 		return false
 	}
 
-	if providedApiKey != authToken {
-		logger.Error("authToken验证失败",
-			logger.String("expected", "***"),
-			logger.String("provided", "***"))
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "401"})
-		return false
+	// 模式1: 验证预配置的 KIRO_CLIENT_TOKEN（如果已配置）
+	if authToken != "" && providedApiKey == authToken {
+		return true
 	}
 
-	return true
+	// 模式2: 尝试作为 refresh token 处理
+	// refresh token 通常是较长的字符串（JWT 或 UUID 格式）
+	if len(providedApiKey) > 20 {
+		logger.Debug("尝试作为refresh token处理",
+			logger.Int("token_length", len(providedApiKey)))
+
+		// 使用动态 Token 缓存获取或刷新 token
+		dynamicCache := auth.GetDynamicTokenCache()
+		token, err := dynamicCache.GetOrRefresh(providedApiKey)
+		if err != nil {
+			logger.Warn("refresh token刷新失败",
+				logger.Err(err),
+				logger.String("token_preview", providedApiKey[:min(10, len(providedApiKey))]+"..."))
+			c.JSON(http.StatusUnauthorized, gin.H{
+				"error": map[string]any{
+					"message": "Invalid refresh token: " + err.Error(),
+					"code":    "invalid_token",
+				},
+			})
+			return false
+		}
+
+		// 将动态获取的 token 存入 context
+		c.Set(DynamicTokenKey, token)
+		logger.Debug("refresh token认证成功",
+			logger.String("token_preview", providedApiKey[:min(10, len(providedApiKey))]+"..."))
+		return true
+	}
+
+	// 既不是预配置 token，也不是有效的 refresh token
+	logger.Error("authToken验证失败",
+		logger.String("expected", "***"),
+		logger.String("provided", "***"))
+	c.JSON(http.StatusUnauthorized, gin.H{"error": "401"})
+	return false
+}
+
+// GetDynamicToken 从 context 中获取动态 token（如果存在）
+func GetDynamicToken(c *gin.Context) (types.TokenInfo, bool) {
+	if v, ok := c.Get(DynamicTokenKey); ok {
+		if token, ok := v.(types.TokenInfo); ok {
+			return token, true
+		}
+	}
+	return types.TokenInfo{}, false
 }

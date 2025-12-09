@@ -43,13 +43,12 @@ func main() {
 		port = envPort
 	}
 
-	// 从环境变量获取客户端认证token（必需，无默认值）
+	// 从环境变量获取客户端认证token（可选）
+	// 如果未设置，仅支持动态 refresh token 认证
 	clientToken := os.Getenv("KIRO_CLIENT_TOKEN")
 	if clientToken == "" {
-		logger.Error("致命错误: 未设置 KIRO_CLIENT_TOKEN 环境变量")
-		logger.Error("请在 .env 文件中设置强密码，例如: KIRO_CLIENT_TOKEN=your-secure-random-password")
-		logger.Error("安全提示: 请使用至少32字符的随机字符串")
-		os.Exit(1)
+		logger.Info("未设置KIRO_CLIENT_TOKEN，将仅支持动态refresh token认证")
+		logger.Info("使用方式: Authorization: Bearer <your_refresh_token>")
 	}
 
 	server.StartServer(port, clientToken, authService)

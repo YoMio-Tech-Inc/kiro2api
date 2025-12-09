@@ -24,6 +24,7 @@ const (
 )
 
 // loadConfigs 从环境变量加载配置
+// 如果未设置 KIRO_AUTH_TOKEN，返回空配置（不报错）
 func loadConfigs() ([]AuthConfig, error) {
 	// 检测并警告弃用的环境变量
 	deprecatedVars := []string{
@@ -46,11 +47,9 @@ func loadConfigs() ([]AuthConfig, error) {
 	// 只支持KIRO_AUTH_TOKEN的JSON格式（支持文件路径或JSON字符串）
 	jsonData := os.Getenv("KIRO_AUTH_TOKEN")
 	if jsonData == "" {
-		return nil, fmt.Errorf("未找到KIRO_AUTH_TOKEN环境变量\n" +
-			"请设置: KIRO_AUTH_TOKEN='[{\"auth\":\"Social\",\"refreshToken\":\"your_token\"}]'\n" +
-			"或设置为配置文件路径: KIRO_AUTH_TOKEN=/path/to/config.json\n" +
-			"支持的认证方式: Social, IdC\n" +
-			"详细配置请参考: .env.example")
+		// 不再报错，返回空配置
+		logger.Info("未设置KIRO_AUTH_TOKEN，将仅支持动态refresh token认证")
+		return []AuthConfig{}, nil
 	}
 
 	// 优先尝试从文件加载，失败后再作为JSON字符串处理
@@ -78,15 +77,15 @@ func loadConfigs() ([]AuthConfig, error) {
 	}
 
 	if len(configs) == 0 {
-		return nil, fmt.Errorf("KIRO_AUTH_TOKEN配置为空，请至少提供一个有效的认证配置")
+		logger.Info("KIRO_AUTH_TOKEN配置为空，将仅支持动态refresh token认证")
+		return []AuthConfig{}, nil
 	}
 
 	validConfigs := processConfigs(configs)
 	if len(validConfigs) == 0 {
-		return nil, fmt.Errorf("没有有效的认证配置\n" +
-			"请检查: \n" +
-			"1. Social认证需要refreshToken字段\n" +
-			"2. IdC认证需要refreshToken、clientId、clientSecret字段")
+		logger.Warn("没有有效的认证配置，将仅支持动态refresh token认证",
+			logger.String("提示", "Social认证需要refreshToken字段，IdC认证需要refreshToken、clientId、clientSecret字段"))
+		return []AuthConfig{}, nil
 	}
 
 	logger.Info("成功加载认证配置",

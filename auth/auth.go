@@ -13,17 +13,23 @@ type AuthService struct {
 }
 
 // NewAuthService 创建新的认证服务（推荐使用此方法而不是全局函数）
+// 如果没有配置 KIRO_AUTH_TOKEN，仍然可以创建 AuthService，仅支持动态 refresh token 认证
 func NewAuthService() (*AuthService, error) {
 	logger.Info("创建AuthService实例")
 
-	// 加载配置
+	// 加载配置（现在允许返回空配置）
 	configs, err := loadConfigs()
 	if err != nil {
 		return nil, fmt.Errorf("加载配置失败: %w", err)
 	}
 
+	// 如果没有配置，创建一个只支持动态 token 的 AuthService
 	if len(configs) == 0 {
-		return nil, fmt.Errorf("未找到有效的token配置")
+		logger.Info("AuthService创建完成（仅动态token模式）")
+		return &AuthService{
+			tokenManager: nil, // 没有预配置的 token 管理器
+			configs:      configs,
+		}, nil
 	}
 
 	// 创建token管理器
